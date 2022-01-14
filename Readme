@@ -1,3 +1,7 @@
 The folders in the current repository contain files written in C for PIC16F877A.
 Each of them was special developed for a certain type of motor, but all of them use the same eletronic board.
 The project of the eletronic board is presented in the current folder.
+
+The folder RobotArmSim contains a MatLab file that simulates the behaviour of a robot arm.
+
+The main purpose of this repository is to create a 3D printed version of a robot arm using C language.
