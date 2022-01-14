@@ -1,0 +1,6 @@
+This matlab script simulates a robot arm consisted of 3 four bar linakge. Three
+different modules are available. If the variable video is set to 1, a
+video with the possible positions will be shown. If the variable image is
+set to 1, an image will be generated with the possible positions marked as
+red '*'. If position is set to 1 a desired position will be required and 
+the algorithm will calculate the necessary angles to achieve this position.
