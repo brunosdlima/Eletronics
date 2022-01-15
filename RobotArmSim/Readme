@@ -1,5 +1,7 @@
-This matlab script simulates a robot arm consisted of 3 four bar linakge. Three
-different modules are available. If the variable video is set to 1, a
+This matlab script simulates a robot arm consisted of 3 four bar linakge. 
+The theory behind it is just four bar linkage as in Mechanisms and Dynamics of Machinery
+combined with coordinate system rotation.
+Three different modules are available. If the variable video is set to 1, a
 video with the possible positions will be shown. If the variable image is
 set to 1, an image will be generated with the possible positions marked as
 red '*'. If position is set to 1 a desired position will be required and 
