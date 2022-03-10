@@ -1,0 +1,2 @@
+This code is used to control two pumps and set a different timer for each of them, printing the time left on the LCD screen.
+The protoboard scheme is presented in the Proteus format. The code is in C language and PIC16F877A was used.
