@@ -1,3 +1,5 @@
+//Is it guaranteed that the motor is actually running the amount that is sent via bluetooth? (Driver Uln2003 changes the steps per revolution of the 28BYJ-48)
+
 #include <16F877A.h>
 #device adc=10
 #fuses HS,NOWDT,PUT,NOPROTECT,NODEBUG,NOBROWNOUT,NOLVP,NODEBUG
@@ -32,6 +34,11 @@
 #define BUTTON4_PIN PIN_A3
 #define BUTTON5_PIN PIN_A4
 
+//Variables for move motor to guarantee precision
+#define STEPS_PER_REV 512
+#define DEGREE_TO_STEP (STEPS_PER_REV / 360.0) // Steps required for 1 degree
+
+
 // Motor state variables
 int motor_position[4] = {180, 180, 180, 180}; // Initial positions
 int motor_active[4] = {1, 1, 1, 1};           // Track active motors
@@ -39,7 +46,7 @@ int step_cycle[4] = {0, 0, 0, 0};             // Counter for each motor's timer 
 int stepmotor[4] = {0, 0, 0, 0};              // Current step for each motor
 int motor_speed = 7;                          // Speed of rotation (adjustable)
 int motor_direction[4] = {1, 1, 1, 1};        // All motors start moving backward (counterclockwise)
-
+float fractional_steps[4] = {0, 0, 0, 0};     // Control the precision of degree movement
 // EEPROM memory slot tracking
 unsigned int memory_slot = 2; // Start at slot 2, slot 1 reserved for "S"
 
@@ -103,32 +110,105 @@ void timer0_isr() {
     set_timer0(6 + get_timer0()); // Maintain consistent timing
 }
 
+#define STEPS_PER_REV 512
+#define DEGREE_TO_STEP (STEPS_PER_REV / 360.0) // Steps required for 1 degree
+
+// Persistent variables to handle fractional steps
+static float fractional_steps[4] = {0, 0, 0, 0}; // One for each motor
+
 void move_motor(int motor_num, int degrees, int direction) {
-    motor_direction[motor_num] = direction; // Set direction
-    motor_active[motor_num] = 1;           // Activate motor
-    int steps = degrees / 3;               // Each step is 3 degrees
-    for (int i = 0; i < steps; i++) {
-        delay_ms(20); // Delay to simulate motor movement
+    // Calculate total steps required (including fractional accumulation)
+    float exact_steps = abs(degrees) * DEGREE_TO_STEP + fractional_steps[motor_num];
+    int total_steps = (int)exact_steps; // Integer part of the steps
+    fractional_steps[motor_num] = exact_steps - total_steps; // Store fractional remainder
+
+    // Set motor direction (0 = forward/clockwise, 1 = backward/counterclockwise)
+    motor_direction[motor_num] = direction;
+    motor_active[motor_num] = 1; // Activate the motor
+
+    for (int step_count = 0; step_count < total_steps; step_count++) {
+        // Perform one step
+        if (direction == 0) { // Forward
+            if (stepmotor[motor_num] == 0) {
+                output_low(MOTOR1_PIN_D3 + motor_num * 4);
+                output_high(MOTOR1_PIN_D0 + motor_num * 4);
+                stepmotor[motor_num] = 1;
+            } else if (stepmotor[motor_num] == 1) {
+                output_low(MOTOR1_PIN_D0 + motor_num * 4);
+                output_high(MOTOR1_PIN_D1 + motor_num * 4);
+                stepmotor[motor_num] = 2;
+            } else if (stepmotor[motor_num] == 2) {
+                output_low(MOTOR1_PIN_D1 + motor_num * 4);
+                output_high(MOTOR1_PIN_D2 + motor_num * 4);
+                stepmotor[motor_num] = 3;
+            } else if (stepmotor[motor_num] == 3) {
+                output_low(MOTOR1_PIN_D2 + motor_num * 4);
+                output_high(MOTOR1_PIN_D3 + motor_num * 4);
+                stepmotor[motor_num] = 0;
+            }
+        } else if (direction == 1) { // Backward
+            if (stepmotor[motor_num] == 0) {
+                output_low(MOTOR1_PIN_D0 + motor_num * 4);
+                output_high(MOTOR1_PIN_D3 + motor_num * 4);
+                stepmotor[motor_num] = 3;
+            } else if (stepmotor[motor_num] == 3) {
+                output_low(MOTOR1_PIN_D3 + motor_num * 4);
+                output_high(MOTOR1_PIN_D2 + motor_num * 4);
+                stepmotor[motor_num] = 2;
+            } else if (stepmotor[motor_num] == 2) {
+                output_low(MOTOR1_PIN_D2 + motor_num * 4);
+                output_high(MOTOR1_PIN_D1 + motor_num * 4);
+                stepmotor[motor_num] = 1;
+            } else if (stepmotor[motor_num] == 1) {
+                output_low(MOTOR1_PIN_D1 + motor_num * 4);
+                output_high(MOTOR1_PIN_D0 + motor_num * 4);
+                stepmotor[motor_num] = 0;
+            }
+        }
+
+        // Update motor position
+        motor_position[motor_num] += (direction == 0 ? 1 : -1) * (360.0 / STEPS_PER_REV);
+
+        // Delay to control speed
+        delay_ms(10); // Adjust delay for motor speed
     }
-    motor_active[motor_num] = 0; // Stop motor after movement
-    motor_direction[motor_num] = 2; // Set to stop
+
+    // Stop the motor after moving
+    motor_active[motor_num] = 0;
+    motor_direction[motor_num] = 2; // Set direction to stop
 }
 
 void return_to_zero_and_adjust() {
-    // Reset all motors to zero position
-    motor_active[0] = motor_active[1] = motor_active[2] = motor_active[3] = 1; // Reactivate all motors
-    motor_direction[0] = motor_direction[1] = motor_direction[2] = motor_direction[3] = 1; // Move counterclockwise
+    int all_motors_stopped = 0; // Flag to check if all motors have stopped
 
-    // Wait until all buttons are pressed
-    while (input(BUTTON1_PIN) == 0 || input(BUTTON2_PIN) == 0 || input(BUTTON3_PIN) == 0 || 
-           (input(BUTTON4_PIN) == 0 && input(BUTTON5_PIN) == 0));
+    while (!all_motors_stopped) {
+        all_motors_stopped = 1; // Assume all motors are stopped, verify below
+        
+        for (int i = 0; i < 4; i++) {
+            if (motor_active[i]) {
+                // Rotate motor `i` counterclockwise by 3 degrees
+                move_motor(i, 3, 1); // 1 = counterclockwise
 
-    // Stop all motors
-    motor_active[0] = motor_active[1] = motor_active[2] = motor_active[3] = 0;
+                // Check the corresponding button for this motor
+                if ((i == 0 && input(BUTTON1_PIN) == 0) || 
+                    (i == 1 && input(BUTTON2_PIN) == 0) || 
+                    (i == 2 && input(BUTTON3_PIN) == 0) || 
+                    (i == 3 && (input(BUTTON4_PIN) == 0 || input(BUTTON5_PIN) == 0))) {
+                    
+                    // Stop the motor and set its position to zero
+                    motor_active[i] = 0;
+                    motor_position[i] = 0;
+                    motor_direction[i] = 2; // Set to "stopped"
+                } else {
+                    all_motors_stopped = 0; // At least one motor is still active
+                }
+            }
+        }
+    }
 
-    // Move each motor 3 degrees clockwise
+    // Once all motors are stopped, move each motor 3 degrees clockwise
     for (int i = 0; i < 4; i++) {
-        move_motor(i, 3, 0); // 0 = Forward (clockwise)
+        move_motor(i, 3, 0); // 0 = clockwise
     }
 }
 
@@ -348,6 +428,7 @@ void main() {
        } else {
            // Different motors, write the new command in the next available slot
            if (memory_slot + 3 > 255) {
+               printf("Error: EEPROM memory is full. Cannot write more commands.\n");
                // Reached EEPROM limit, write "F" to the next slot and finish
                write_eeprom(memory_slot, 'F');
                write_eeprom(1, 'S');  // Indicate end of the process in the first slot
